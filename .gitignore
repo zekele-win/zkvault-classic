@@ -1,0 +1,44 @@
+# Node.js
+node_modules/
+npm-debug.log
+package-lock.json
+
+# TypeScript
+dist/
+build/
+*.tsbuildinfo
+
+# Hardhat artifacts and cache
+artifacts/
+cache/
+coverage/
+typechain/
+typechain-types/
+
+# circom
+*.wasm
+*.sym
+*.zkey
+*.ptau
+
+# MacOS specific files
+.DS_Store
+
+# IDE/Editor folders
+.idea/
+.vscode/
+
+# Logs and other files
+*.log
+
+# Test coverage
+coverage/
+*.lcov
+
+# Temporary files
+*.tmp
+*.swp
+
+# Local files
+.env
+loc
