@@ -6,7 +6,7 @@ import {Groth16Verifier} from "./ZkVaultClassicVerifier.sol";
 import {MerkleTree} from "./MerkleTree.sol";
 
 /// @title ZkVaultClassic - A smart contract for deposit and withdrawal using zk-SNARK proofs
-/// @dev This contract allows users to deposit a fixed amount of ETH anonymously
+/// @notice This contract allows users to deposit a fixed amount of ETH anonymously
 /// and withdraw later using a zero-knowledge proof.
 contract ZkVaultClassic is ReentrancyGuard {
     // Verifier interface
@@ -15,17 +15,30 @@ contract ZkVaultClassic is ReentrancyGuard {
     // Deposit denomination
     uint256 private immutable _denomination;
 
+    // Use the MerkleTree library for the MerkleTree.Info type
     using MerkleTree for MerkleTree.Info;
+    // Instance of the Merkle tree to manage commitments and roots
     MerkleTree.Info private _merkleTree;
 
+    // Mapping to track the commitments that have been used, ensuring uniqueness
     mapping(uint256 => bool) private _commitments;
+    // Mapping to track the commitments that have been used, ensuring uniqueness
     mapping(uint256 => bool) private _nullifierHashes;
 
+    /// @dev Emitted when a deposit is made.
+    /// @param commitment The Pedersen commitment hash of the deposit.
+    /// @param leafIndex The index of the commitment leaf in the Merkle tree.
+    /// @param timestamp The block timestamp when the deposit was made.
     event Deposit(
         uint256 indexed commitment,
         uint256 leafIndex,
         uint256 timestamp
     );
+
+    /// @dev Emitted when a withdrawal is processed.
+    /// @param nullifierHash The nullifier hash of the withdrawal.
+    /// @param recipient The address of the user receiving the withdrawn ETH.
+    /// @param timestamp The block timestamp when the withdrawal was made.
     event Withdraw(
         uint256 indexed nullifierHash,
         address indexed recipient,
@@ -35,15 +48,10 @@ contract ZkVaultClassic is ReentrancyGuard {
     /// @notice Initializes the vault with a verifier and fixed ETH denomination
     /// @param aAerifier The address of the zk-SNARK verifier contract
     /// @param aDenomination The fixed ETH amount for each deposit and withdrawal
-    constructor(
-        IVerifier aAerifier,
-        uint256 aDenomination,
-        uint256 aLevels,
-        uint256 aRootSize
-    ) {
+    constructor(IVerifier aAerifier, uint256 aDenomination, uint256 aLevels) {
         _verifier = aAerifier;
         _denomination = aDenomination;
-        _merkleTree.init(aLevels, aRootSize);
+        _merkleTree.init(aLevels);
     }
 
     /// @notice Returns the fixed denomination required for deposit/withdraw
@@ -52,14 +60,22 @@ contract ZkVaultClassic is ReentrancyGuard {
         return _denomination;
     }
 
+    /// @notice Returns the number of levels in the Merkle tree
+    /// @return The number of levels in the Merkle tree
     function levels() external view returns (uint256) {
         return _merkleTree.levels;
     }
 
-    function rootSize() external view returns (uint256) {
-        return _merkleTree.rootSize;
+    /// @notice Returns the commitment at the given leaf index
+    /// @param index The index of the leaf
+    /// @return The commitment stored at the given index
+    function getCommitment(uint256 index) external view returns (uint256) {
+        return _merkleTree.leaves[index];
     }
 
+    /// @notice Checks if a Merkle root is known in the Merkle tree
+    /// @param root The root to check
+    /// @return True if the root is known, false otherwise
     function isKnownRoot(uint256 root) external view returns (bool) {
         return _merkleTree.isKnownRoot(root);
     }
@@ -90,9 +106,9 @@ contract ZkVaultClassic is ReentrancyGuard {
     /// @param pB zk-SNARK proof parameter B
     /// @param pC zk-SNARK proof parameter C
     /// @param pubSignals The public inputs to the zk circuit:
-    /// - pubSignals[2]: root
-    /// - pubSignals[3]: nullifierHash
-    /// - pubSignals[4]: recipient
+    /// - pubSignals[0]: root
+    /// - pubSignals[1]: nullifierHash
+    /// - pubSignals[2]: recipient
     /// @dev The proof must be valid.
     ///   The root should exist in merkle tree.
     ///   The note should not have been spent.
@@ -101,25 +117,26 @@ contract ZkVaultClassic is ReentrancyGuard {
         uint[2] calldata pA,
         uint[2][2] calldata pB,
         uint[2] calldata pC,
-        uint[5] calldata pubSignals
+        uint[3] calldata pubSignals
     ) external nonReentrant {
         // Retrieve the recipient address from the public signals
-        address recipient = address(uint160(pubSignals[4]));
+        address recipient = address(uint160(pubSignals[2]));
 
         // Retrieve the nullifierHash from the public signals,
         // and ensure it not spent
-        uint256 nullifierHash = pubSignals[3];
+        uint256 nullifierHash = pubSignals[1];
         require(!_nullifierHashes[nullifierHash], "Note already spent");
 
         // Retrieve the root from the public signals
         // and ensure existing in merkle tree
-        uint256 root = pubSignals[2];
+        uint256 root = pubSignals[0];
         require(_merkleTree.isKnownRoot(root), "Note not existed");
 
         // Validate the zero-knowledge proof using the provided proof parameters
         bool valid = _verifier.verifyProof(pA, pB, pC, pubSignals);
         require(valid, "Invalid proof");
 
+        // Mark the nullifier hash as spent
         _nullifierHashes[nullifierHash] = true;
 
         // Transfer the ETH to the recipient
@@ -150,6 +167,6 @@ interface IVerifier {
         uint[2] calldata pA,
         uint[2][2] calldata pB,
         uint[2] calldata pC,
-        uint[5] calldata pubSignals
+        uint[3] calldata pubSignals
     ) external view returns (bool);
 }

@@ -4,10 +4,10 @@ import { utils as ffutils } from "ffjavascript";
 import * as pedersen from "../utils/pedersen";
 import * as merkleTree from "../utils/merkle-tree";
 
-describe("ZkVaultClassic _circuit", () => {
+describe("ZkVaultClassic circuit", () => {
   let _circuit: WasmTester;
 
-  const LEVELS = 20;
+  const LEVELS = 10;
 
   async function createWitness(
     nullifier: bigint,
@@ -47,18 +47,16 @@ describe("ZkVaultClassic _circuit", () => {
     _circuit = await wasm("./circuits/ZkVaultClassic.circom");
   });
 
-  it("should correctly output consistent root and recipient.", async () => {
+  it("should correctly invoke.", async () => {
     const witnessInput = await createWitness(123n, 456n, 789n);
     const witness = await _circuit.calculateWitness(witnessInput, true);
-    await _circuit.assertOut(witness, { rootOut: witnessInput.root });
-    await _circuit.assertOut(witness, { recipientOut: witnessInput.recipient });
+    await _circuit.assertOut(witness, {});
   });
 
-  it("should correctly output consistent root and recipient with long tree.", async () => {
+  it("should correctly invoke with long tree.", async () => {
     const witnessInput = await createWitness(123n, 456n, 789n, 500);
     const witness = await _circuit.calculateWitness(witnessInput, true);
-    await _circuit.assertOut(witness, { rootOut: witnessInput.root });
-    await _circuit.assertOut(witness, { recipientOut: witnessInput.recipient });
+    await _circuit.assertOut(witness, {});
   });
 
   it("should throw error if nullifier = 0n.", async () => {

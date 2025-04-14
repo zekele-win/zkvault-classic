@@ -12,8 +12,6 @@ import * as hex from "../utils/hex";
 import * as pedersen from "../utils/pedersen";
 import * as merkleTree from "../utils/merkle-tree";
 
-const LEVELS = 10;
-
 /**
  * Generates a wallet from the given mnemonic and derivation index.
  * @param mnemonic The mnemonic phrase.
@@ -79,40 +77,6 @@ async function printBalances(
     const balance = await provider.getBalance(address);
     console.log(`${label}: ${ethers.formatEther(balance)} ETH`);
   }
-}
-
-/**
- * Fetch the history commitments on deposit.
- * @param vaultContract The vault contract.
- * @param fromBlock The block number used to filter events.
- * @param commitment The commitment used to search from the events.
- * @returns the history commitments
- */
-async function fetchHistoryCommitments(
-  vaultContract: ethers.Contract,
-  fromBlock: number,
-  commitment: bigint
-): Promise<bigint[]> {
-  const filter = vaultContract.filters.Deposit();
-  const logs = await vaultContract.queryFilter(filter, fromBlock);
-  const events = logs.map((e) => {
-    const { commitment, leafIndex, timestamp } = (e as ethers.EventLog).args;
-    return { commitment, leafIndex, timestamp };
-  });
-
-  let commitmentIndex = -1;
-  const commitments = events
-    .sort((a, b) => Number(a.leafIndex) - Number(b.leafIndex))
-    .map((e, i) => {
-      const c = BigInt(e.commitment);
-      if (c === commitment) {
-        commitmentIndex = i;
-      }
-      return c;
-    });
-  assert(commitmentIndex >= 0, "The commitment is not found.");
-
-  return commitments.slice(0, commitmentIndex + 1);
 }
 
 /**
@@ -237,16 +201,29 @@ async function withdraw(nullifier: bigint, secret: bigint) {
   );
   console.log({ commitment });
 
-  const commitments = await fetchHistoryCommitments(
-    vaultContract,
-    vaultContractBlock,
-    commitment
-  );
+  // Find all the commitments before our commitment including  our commitment
+  let found = false;
+  const commitments = [];
+  for (let i = 0n; ; ++i) {
+    const theCommitment = await vaultContract.getCommitment(i);
+    if (theCommitment === 0n) break;
+    commitments.push(theCommitment);
+    if (theCommitment === commitment) {
+      found = true;
+      break;
+    }
+  }
+  assert(found, "The commitment does not existed.");
   console.log({ commitments });
 
+  // Get levels from the vault contract
+  const levels = Number(await vaultContract.levels());
+  console.log({ levels });
+
+  // Compute the arguments for computing circuit prrof
   const nullifierHash = await pedersen.hash(nullifier);
   const tree = await merkleTree.create(
-    LEVELS,
+    levels,
     commitments.map((c) => c.toString())
   );
   const root = BigInt(tree.root);
@@ -254,6 +231,10 @@ async function withdraw(nullifier: bigint, secret: bigint) {
   const pathElements = treepath.pathElements.map((c) => BigInt(c));
   const pathIndices = treepath.pathIndices.map((c) => BigInt(c));
 
+  // Check if the root existed in the vault
+  assert(await vaultContract.isKnownRoot(root), "The root does not existed.");
+
+  // Compute circuit prrof
   const { proof, publicSignals } = await snarkjs.groth16.fullProve(
     {
       // Public inputs
@@ -267,11 +248,8 @@ async function withdraw(nullifier: bigint, secret: bigint) {
       pathElements,
       pathIndices,
     },
-    path.join(
-      __dirname,
-      "../circuits/build/ZkVaultClassic_js/ZkVaultClassic.wasm"
-    ),
-    path.join(__dirname, "../circuits/build/ZkVaultClassic.zkey")
+    path.join(__dirname, "../build/ZkVaultClassic_js/ZkVaultClassic.wasm"),
+    path.join(__dirname, "../build/ZkVaultClassic.zkey")
   );
   console.log({ proof, publicSignals });
 
@@ -294,8 +272,6 @@ async function withdraw(nullifier: bigint, secret: bigint) {
       BigInt(publicSignals[0]),
       BigInt(publicSignals[1]),
       BigInt(publicSignals[2]),
-      BigInt(publicSignals[3]),
-      BigInt(publicSignals[4]),
     ]
   );
   console.log({ tx });

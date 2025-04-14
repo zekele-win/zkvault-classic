@@ -12,7 +12,6 @@ import * as merkleTree from "../utils/merkle-tree";
 describe("ZkVaultClassic contract", function () {
   const _denomination = ethers.parseEther("1");
   const _levels = 10;
-  const _rootSize = 100;
 
   let _vaultContract: ZkVaultClassic;
   let _ownerAccount: Signer;
@@ -34,9 +33,31 @@ describe("ZkVaultClassic contract", function () {
   async function prepareWithdraw(
     nullifier: bigint,
     secret: bigint,
-    recipient: bigint,
-    commitments: bigint[]
+    recipient: bigint
   ) {
+    const commitment = await pedersen.hash(
+      Buffer.concat([
+        ffutils.leInt2Buff(nullifier, 31),
+        ffutils.leInt2Buff(secret, 31),
+      ])
+    );
+
+    let found = false;
+    const commitments = [];
+    for (let i = 0n; ; ++i) {
+      const theCommitment = await _vaultContract.getCommitment(i);
+      if (theCommitment === 0n) break;
+      commitments.push(theCommitment);
+      if (theCommitment === commitment) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      commitments.length = 0;
+      commitments.push(commitment);
+    }
+
     const nullifierHash = await pedersen.hash(nullifier);
     const tree = await merkleTree.create(
       _levels,
@@ -81,8 +102,8 @@ describe("ZkVaultClassic contract", function () {
         pathElements,
         pathIndices,
       },
-      "./circuits/build/ZkVaultClassic_js/ZkVaultClassic.wasm",
-      "./circuits/build/ZkVaultClassic.zkey"
+      "./build/ZkVaultClassic_js/ZkVaultClassic.wasm",
+      "./build/ZkVaultClassic.zkey"
     );
     // console.log({ proof, publicSignals });
 
@@ -92,13 +113,11 @@ describe("ZkVaultClassic contract", function () {
         [BigInt(proof.pi_b[0][1]), BigInt(proof.pi_b[0][0])],
         [BigInt(proof.pi_b[1][1]), BigInt(proof.pi_b[1][0])],
       ],
-      [BigInt(proof.pi_c[0]), BigInt(proof.pi_c[1])],
+      fakeProof ? [0n, 0n] : [BigInt(proof.pi_c[0]), BigInt(proof.pi_c[1])],
       [
-        fakeProof ? 0n : BigInt(publicSignals[0]),
+        BigInt(publicSignals[0]),
         BigInt(publicSignals[1]),
         BigInt(publicSignals[2]),
-        BigInt(publicSignals[3]),
-        BigInt(publicSignals[4]),
       ]
     );
   }
@@ -120,8 +139,7 @@ describe("ZkVaultClassic contract", function () {
     _vaultContract = await vaultContractFactory.deploy(
       verifierContractAddress,
       _denomination,
-      _levels,
-      _rootSize
+      _levels
     );
   });
 
@@ -139,11 +157,6 @@ describe("ZkVaultClassic contract", function () {
       const levels = await _vaultContract.levels();
       expect(levels).to.equal(_levels);
     });
-
-    it("should correctly set the rootSize.", async function () {
-      const rootSize = await _vaultContract.rootSize();
-      expect(rootSize).to.equal(_rootSize);
-    });
   });
 
   describe("receive", function () {
@@ -154,6 +167,48 @@ describe("ZkVaultClassic contract", function () {
           value: _denomination,
         })
       ).to.be.revertedWith("Use deposit function");
+    });
+  });
+
+  describe("getCommitment", function () {
+    it("should correctly to return the existed commitments without any deposit.", async function () {
+      expect(await _vaultContract.getCommitment(0n)).to.equal(0n);
+    });
+
+    it("should correctly to return the existed commitments with deposits.", async function () {
+      const commitments = [];
+      const count = 3n;
+      for (let i = 0n; i < count; ++i) {
+        const commitment = await prepareDeposit(123n + i, 456n + i);
+        await deposit(commitment, _denomination);
+        commitments.push(commitment);
+      }
+      for (let i = 0n; i < count; ++i) {
+        expect(await _vaultContract.getCommitment(i)).to.equal(
+          commitments[Number(i)]
+        );
+      }
+      expect(await _vaultContract.getCommitment(count)).to.equal(0n);
+    });
+  });
+
+  describe("isKnownRoot", function () {
+    it("should failed to check without the consistent root existed in the vault.", async function () {
+      expect(await _vaultContract.isKnownRoot(0n)).to.false;
+      expect(await _vaultContract.isKnownRoot(1n)).to.false;
+      expect(await _vaultContract.isKnownRoot(1234n)).to.false;
+    });
+
+    it("should successfully to check with the consistent root existed in the vault.", async function () {
+      const nullifier = 123n;
+      const secret = 456n;
+      const recipient = 789n;
+
+      const commitment = await prepareDeposit(nullifier, secret);
+      await deposit(commitment, _denomination);
+
+      const { root } = await prepareWithdraw(nullifier, secret, recipient);
+      expect(await _vaultContract.isKnownRoot(root)).to.true;
     });
   });
 
@@ -178,6 +233,15 @@ describe("ZkVaultClassic contract", function () {
     });
 
     it("should correctly deposit and emit an event.", async function () {
+      for (let i = 0n; i < 3n; ++i) {
+        const commitment = await prepareDeposit(123n + i, 456n + i);
+        await expect(deposit(commitment, _denomination))
+          .to.emit(_vaultContract, "Deposit")
+          .withArgs(commitment, i, anyValue);
+      }
+    });
+
+    it("should correctly deposit with consietent ETH transfering.", async function () {
       const commitment = await prepareDeposit(123n, 456n);
 
       const vaultContractBalnceBefore =
@@ -189,9 +253,6 @@ describe("ZkVaultClassic contract", function () {
       );
 
       const tx = await deposit(commitment, _denomination);
-      expect(tx)
-        .to.emit(_vaultContract, "Deposit")
-        .withArgs(commitment, 0n, anyValue);
 
       const receipt = await tx.wait();
       const gasCost = receipt!.gasUsed * receipt!.gasPrice;
@@ -222,9 +283,7 @@ describe("ZkVaultClassic contract", function () {
         secret,
         pathElements,
         pathIndices,
-      } = await prepareWithdraw(123n, 456n, 789n, [
-        await prepareDeposit(123n, 456n),
-      ]);
+      } = await prepareWithdraw(123n, 456n, 789n);
 
       await expect(
         withdraw(
@@ -248,7 +307,7 @@ describe("ZkVaultClassic contract", function () {
       await deposit(commitment, _denomination);
 
       const { root, nullifierHash, pathElements, pathIndices } =
-        await prepareWithdraw(nullifier, secret, recipient, [commitment]);
+        await prepareWithdraw(nullifier, secret, recipient);
 
       await withdraw(
         root,
@@ -282,7 +341,7 @@ describe("ZkVaultClassic contract", function () {
       await deposit(commitment, _denomination);
 
       const { root, nullifierHash, pathElements, pathIndices } =
-        await prepareWithdraw(nullifier, secret, recipient, [commitment]);
+        await prepareWithdraw(nullifier, secret, recipient);
 
       await expect(
         withdraw(
@@ -307,15 +366,7 @@ describe("ZkVaultClassic contract", function () {
       await deposit(commitment, _denomination);
 
       const { root, nullifierHash, pathElements, pathIndices } =
-        await prepareWithdraw(nullifier, secret, recipient, [commitment]);
-
-      const vaultContractBalnceBefore =
-        await _ownerAccount.provider!.getBalance(
-          await _vaultContract.getAddress()
-        );
-      const recipientBalnceBefore = await _ownerAccount.provider!.getBalance(
-        hex.from(recipient, 20)
-      );
+        await prepareWithdraw(nullifier, secret, recipient);
 
       await expect(
         withdraw(
@@ -334,6 +385,73 @@ describe("ZkVaultClassic contract", function () {
           ethers.getAddress(hex.from(recipient, 20)),
           anyValue
         );
+    });
+
+    it("should correctly withdraw and emit an event for multi deposits and withdraws.", async function () {
+      for (let i = 0n; i < 3n; ++i) {
+        const nullifier = 1230n + i;
+        const secret = 4560n + i;
+
+        const commitment = await prepareDeposit(nullifier, secret);
+        await deposit(commitment, _denomination);
+      }
+
+      for (let i = 0n; i < 3n; ++i) {
+        const nullifier = 1230n + i;
+        const secret = 4560n + i;
+        const recipient = 7890n + i;
+
+        const { root, nullifierHash, pathElements, pathIndices } =
+          await prepareWithdraw(nullifier, secret, recipient);
+
+        await expect(
+          withdraw(
+            root,
+            nullifierHash,
+            recipient,
+            nullifier,
+            secret,
+            pathElements,
+            pathIndices
+          )
+        )
+          .to.emit(_vaultContract, "Withdraw")
+          .withArgs(
+            nullifierHash,
+            ethers.getAddress(hex.from(recipient, 20)),
+            anyValue
+          );
+      }
+    });
+
+    it("should correctly withdraw with consietent ETH transfering.", async function () {
+      const nullifier = 123n;
+      const secret = 456n;
+      const recipient = 789n;
+
+      const commitment = await prepareDeposit(nullifier, secret);
+      await deposit(commitment, _denomination);
+
+      const { root, nullifierHash, pathElements, pathIndices } =
+        await prepareWithdraw(nullifier, secret, recipient);
+
+      const vaultContractBalnceBefore =
+        await _ownerAccount.provider!.getBalance(
+          await _vaultContract.getAddress()
+        );
+      const recipientBalnceBefore = await _ownerAccount.provider!.getBalance(
+        hex.from(recipient, 20)
+      );
+
+      await withdraw(
+        root,
+        nullifierHash,
+        recipient,
+        nullifier,
+        secret,
+        pathElements,
+        pathIndices
+      );
 
       const vaultContractBalnceAfter = await _ownerAccount.provider!.getBalance(
         await _vaultContract.getAddress()
@@ -348,86 +466,6 @@ describe("ZkVaultClassic contract", function () {
       expect(recipientBalnceAfter - recipientBalnceBefore).to.equal(
         _denomination
       );
-    });
-
-    it("should correctly withdraw and emit an event for multi (deposit + withdraw)s.", async function () {
-      const commitments = [];
-
-      for (let i = 0n; i < 3n; ++i) {
-        const nullifier = 1230n + i;
-        const secret = 4560n + i;
-        const recipient = 7890n + i;
-
-        const commitment = await prepareDeposit(nullifier, secret);
-        await deposit(commitment, _denomination);
-        commitments.push(commitment);
-
-        const { root, nullifierHash, pathElements, pathIndices } =
-          await prepareWithdraw(nullifier, secret, recipient, commitments);
-
-        await expect(
-          withdraw(
-            root,
-            nullifierHash,
-            recipient,
-            nullifier,
-            secret,
-            pathElements,
-            pathIndices
-          )
-        )
-          .to.emit(_vaultContract, "Withdraw")
-          .withArgs(
-            nullifierHash,
-            ethers.getAddress(hex.from(recipient, 20)),
-            anyValue
-          );
-      }
-    });
-
-    it("should correctly withdraw and emit an event for multi deposits and multi withdraws.", async function () {
-      const commitments = [];
-
-      for (let i = 0n; i < 3n; ++i) {
-        const nullifier = 1230n + i;
-        const secret = 4560n + i;
-
-        const commitment = await prepareDeposit(nullifier, secret);
-        await deposit(commitment, _denomination);
-        commitments.push(commitment);
-      }
-
-      for (let i = 0n; i < 3n; ++i) {
-        const nullifier = 1230n + i;
-        const secret = 4560n + i;
-        const recipient = 7890n + i;
-
-        const { root, nullifierHash, pathElements, pathIndices } =
-          await prepareWithdraw(
-            nullifier,
-            secret,
-            recipient,
-            commitments.slice(0, Number(i) + 1)
-          );
-
-        await expect(
-          withdraw(
-            root,
-            nullifierHash,
-            recipient,
-            nullifier,
-            secret,
-            pathElements,
-            pathIndices
-          )
-        )
-          .to.emit(_vaultContract, "Withdraw")
-          .withArgs(
-            nullifierHash,
-            ethers.getAddress(hex.from(recipient, 20)),
-            anyValue
-          );
-      }
     });
   });
 });

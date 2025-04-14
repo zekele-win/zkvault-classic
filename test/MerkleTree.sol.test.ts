@@ -1,47 +1,34 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { buildMimcSponge } from "circomlibjs";
 import { MerkleTreeWrapper } from "../typechain-types";
 import * as merkleTree from "../utils/merkle-tree";
 
-async function deployContract(
-  levels: bigint,
-  rootSize: bigint
-): Promise<MerkleTreeWrapper> {
-  return await (
-    await ethers.getContractFactory("MerkleTreeWrapper")
-  ).deploy(levels, rootSize);
-}
-
 describe("MerkleTree contract", function () {
+  async function deployContract(levels: bigint): Promise<MerkleTreeWrapper> {
+    return await (
+      await ethers.getContractFactory("MerkleTreeWrapper")
+    ).deploy(levels);
+  }
+
   describe("initialize", function () {
     it("should correctly initialize.", async function () {
-      const contract = await deployContract(20n, 100n);
+      const contract = await deployContract(10n);
       expect(await contract.getAddress()).to.be.properAddress;
     });
 
     it("should revert if initialize with invalid levels.", async function () {
-      await expect(deployContract(0n, 100n)).to.revertedWith(
+      await expect(deployContract(0n)).to.revertedWith(
         "Merkle tree levels must be [1, 32]"
       );
-      await expect(deployContract(33n, 100n)).to.revertedWith(
+      await expect(deployContract(33n)).to.revertedWith(
         "Merkle tree levels must be [1, 32]"
-      );
-    });
-
-    it("should revert if initialize with invalid rootSize.", async function () {
-      await expect(deployContract(20n, 9n)).to.revertedWith(
-        "Merkle tree root size must be [10, 1000]"
-      );
-      await expect(deployContract(20n, 1001n)).to.revertedWith(
-        "Merkle tree root size must be [10, 1000]"
       );
     });
   });
 
   describe("insertLeaf", function () {
     it("should correctly insert a leaf and return an index.", async function () {
-      const contract = await deployContract(20n, 100n);
+      const contract = await deployContract(10n);
       const leaves = [11n, 22n, 33n];
       for (const [index, leaf] of leaves.entries()) {
         await expect(contract.insertLeaf(leaf))
@@ -52,7 +39,7 @@ describe("MerkleTree contract", function () {
 
     it("should revert if insert a leaf while the tree if full.", async function () {
       const levels = 3n;
-      const contract = await deployContract(levels, 100n);
+      const contract = await deployContract(levels);
 
       const maxLeafCount = 2n ** levels - 1n;
       for (let index = 0n; index <= maxLeafCount; ++index) {
@@ -68,13 +55,11 @@ describe("MerkleTree contract", function () {
   describe("isKnownRoot", function () {
     it("should sucessfully check the root after insert a leaf.", async function () {
       const levels = 10n;
-      const rootSize = 10n;
-
-      const contract = await deployContract(levels, rootSize);
+      const contract = await deployContract(levels);
 
       const leaves: bigint[] = [];
       const roots: bigint[] = [];
-      for (let i = 0n; i < rootSize; ++i) {
+      for (let i = 0n; i < 10n; ++i) {
         const l = (i + 1n) ** 2n;
 
         const tx = await contract.insertLeaf(l);
@@ -93,12 +78,6 @@ describe("MerkleTree contract", function () {
         const root = BigInt(tree.root);
         // console.log({ root });
         roots.push(root);
-
-        // const rootSise = await contract.getRootSize();
-        // for (let rootIndex = 0; rootIndex < rootSise; ++rootIndex) {
-        //   const curRoot = await contract.getRoot(rootIndex);
-        //   console.log({ index: rootIndex, root: curRoot });
-        // }
       }
 
       for (const root of roots) {
@@ -106,39 +85,9 @@ describe("MerkleTree contract", function () {
       }
     });
 
-    it("should failed to check the root after insert a leaf while root history is overflowed.", async function () {
-      const levels = 10n;
-      const rootSize = 10n;
-
-      const contract = await deployContract(levels, rootSize);
-
-      const leaves: bigint[] = [];
-      const roots: bigint[] = [];
-      for (let i = 0n; i < rootSize * 2n; ++i) {
-        const l = (i + 1n) ** 2n;
-
-        const tx = await contract.insertLeaf(l);
-        const receipt = await tx.wait();
-
-        const [index, leaf] = contract.interface.parseLog(
-          receipt!.logs[0]
-        )!.args;
-        // console.log({ index, leaf });
-        leaves.push(leaf);
-
-        const tree = await merkleTree.create(
-          Number(levels),
-          leaves.map((c) => c.toString())
-        );
-        const root = BigInt(tree.root);
-        // console.log({ root });
-        roots.push(root);
-      }
-
-      for (const [i, root] of roots.entries()) {
-        const expected = i >= roots.length - Number(rootSize);
-        expect(await contract.isKnownRoot(root)).to.equal(expected);
-      }
+    it("should failed check the root before insert a leaf.", async function () {
+      const contract = await deployContract(10n);
+      expect(await contract.isKnownRoot(1234n)).to.false;
     });
   });
 });

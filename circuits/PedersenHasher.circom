@@ -3,7 +3,11 @@ pragma circom 2.0.0;
 include "../node_modules/circomlib/circuits/bitify.circom";
 include "../node_modules/circomlib/circuits/pedersen.circom";
 
-// Hash the nullifier to nullifierHash and nullifier + secret to commitment using Pedersen hash
+//
+// PedersenHasher - Generates:
+//   1. A unique commitment from a user's (nullifier + secret)
+//   2. A nullifier hash to be used for preventing double spends
+//
 template PedersenHasher() {
     // Input: user’s nullifier to ensure uniqueness and prevent double usage
     signal input nullifier;

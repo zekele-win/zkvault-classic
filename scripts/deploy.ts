@@ -5,9 +5,6 @@ import path from "path";
 import fs from "fs";
 import { BytesLike, ethers } from "ethers";
 
-const LEVELS = 10n;
-const ROOT_SIZE = 100n;
-
 /**
  * Generates a wallet from the given mnemonic and derivation index.
  * @param mnemonic The mnemonic phrase.
@@ -146,7 +143,8 @@ async function deploy(denomination: string) {
   const verifierContractDeployBlock = verifierContractReceipt.blockNumber;
   console.log({ verifierContractAddress, verifierContractDeployBlock });
 
-  // Deploy vault contract with the verifier address and denomination
+  // Deploy vault contract with the verifier address, denomination
+  // and levels of 20 conformed to the cricuit.
   const { abi: vaultContractAbi, bytecode: vaultContractBytecode } =
     getContractInfo("ZkVaultClassic", "ZkVaultClassic");
   const { contract: vaultContract, receipt: vaultContractReceipt } =
@@ -156,8 +154,7 @@ async function deploy(denomination: string) {
       vaultContractBytecode,
       verifierContractAddress,
       ethers.parseEther(denomination),
-      LEVELS,
-      ROOT_SIZE
+      10n
     );
   const vaultContractAddress = vaultContract.target as string;
   const vaultContractDeployBlock = vaultContractReceipt.blockNumber;

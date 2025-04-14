@@ -3,14 +3,22 @@ pragma solidity ^0.8.28;
 
 import {MiMC} from "./MiMC.sol";
 
+/// @title MerkleTree Library for Merkle Tree Management.
+/// @notice Provides functions to store and manage leaves and roots for efficient Merkle tree operations.
 library MerkleTree {
     struct Info {
+        // The number of levels in the Merkle tree
         uint256 levels;
+        // A mapping to store leaf nodes by index
+        mapping(uint256 => uint256) leaves;
+        // The next index for inserting leaves
         uint256 leafIndex;
-        uint256 rootSize;
-        uint256 rootIndex;
-        mapping(uint256 => uint256) subTrees;
+        // A mapping to store roots by index
         mapping(uint256 => uint256) roots;
+        // The nect index for storing roots
+        uint256 rootIndex;
+        // A mapping to store intermediate subtree hashes
+        mapping(uint256 => uint256) subTrees;
     }
 
     uint256 private constant MIN_LEVELS = 1;
@@ -19,30 +27,30 @@ library MerkleTree {
     uint256 private constant MIN_ROOT_SIZE = 10;
     uint256 private constant MAX_ROOT_SIZE = 1000;
 
-    function init(
-        Info storage self,
-        uint256 levels,
-        uint256 rootSize
-    ) internal {
+    /// @notice Initializes the Merkle tree with a specific number of levels
+    /// @param self The Merkle tree info structure
+    /// @param levels The number of levels in the Merkle tree
+    function init(Info storage self, uint256 levels) internal {
         require(
             levels >= MIN_LEVELS && levels <= MAX_LEVELS,
             "Merkle tree levels must be [1, 32]"
         );
-        require(
-            rootSize >= MIN_ROOT_SIZE && rootSize <= MAX_ROOT_SIZE,
-            "Merkle tree root size must be [10, 1000]"
-        );
-
         self.levels = levels;
+
         self.leafIndex = 0;
-        self.rootSize = rootSize;
-        self.rootIndex = 0;
+
+        self.roots[0] = _getZero(0);
+        self.rootIndex = 1;
+
         for (uint256 i = 0; i <= levels; ++i) {
             self.subTrees[i] = _getZero(i);
         }
-        self.roots[0] = _getZero(0);
     }
 
+    /// @notice Inserts a new leaf into the Merkle tree and returns its index
+    /// @param self The Merkle tree info structure
+    /// @param leaf The leaf value to be inserted
+    /// @return The index of the inserted leaf
     function insertLeaf(
         Info storage self,
         uint256 leaf
@@ -50,8 +58,6 @@ library MerkleTree {
         uint256 levels = self.levels;
         uint256 leafIndex = self.leafIndex;
         require(leafIndex != 2 ** levels, "Merkle tree is full");
-
-        uint256 rootSize = self.rootSize;
         uint256 rootIndex = self.rootIndex;
 
         uint256 currentLeafIndex = leafIndex;
@@ -73,33 +79,36 @@ library MerkleTree {
             currentLeafIndex /= 2;
         }
 
-        uint256 newRootIndex = (rootIndex + 1) % rootSize;
-        self.rootIndex = newRootIndex;
-        self.roots[newRootIndex] = currentLevelHash;
+        self.roots[rootIndex] = currentLevelHash;
+        self.rootIndex = rootIndex + 1;
 
+        self.leaves[leafIndex] = leaf;
         self.leafIndex = leafIndex + 1;
+
         return leafIndex;
     }
 
+    /// @notice Checks if a given root is known
+    /// @param self The Merkle tree info structure
+    /// @param root The root to check
+    /// @return True if the root is known, false otherwise
     function isKnownRoot(
         Info storage self,
         uint256 root
     ) internal view returns (bool) {
-        if (root == 0) {
-            return false;
-        }
+        if (root == 0) return false;
 
-        uint256 rootSize = self.rootSize;
         uint256 rootIndex = self.rootIndex;
-
-        for (uint256 i = 0; i < rootSize; ++i) {
-            uint256 index = (rootIndex + rootSize - i) % rootSize;
-            if (self.roots[index] == root) return true;
+        for (uint256 i = 0; i < rootIndex; ++i) {
+            if (self.roots[i] == root) return true;
         }
 
         return false;
     }
 
+    /// @notice Returns a predefined zero value for a specific index
+    /// @param index The index to get the zero value for
+    /// @return The predefined zero value for the given index
     function _getZero(uint256 index) private pure returns (uint256) {
         // keccak256("zkvault-classic") % BN254_FIELD_SIZE
         uint256[33] memory ZERO_VALUES = [

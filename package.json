@@ -2,8 +2,8 @@
   "name": "zkvault-classic",
   "version": "1.0.0",
   "scripts": {
-    "build": "mkdir -p ./circuits/build && ~/tool/iden3/circom ./circuits/ZkVaultClassic.circom --r1cs --wasm -o ./circuits/build",
-    "setup": "snarkjs groth16 setup circuits/build/ZkVaultClassic.r1cs circuits/powersOfTau28_hez_final_18.ptau circuits/build/ZkVaultClassic.zkey && snarkjs zkey export verificationkey circuits/build/ZkVaultClassic.zkey circuits/build/ZkVaultClassicVerificationKey.json && snarkjs zkey export solidityverifier circuits/build/ZkVaultClassic.zkey contracts/ZkVaultClassicVerifier.sol",
+    "build": "mkdir -p ./build && circom ./circuits/ZkVaultClassic.circom --r1cs --wasm -o ./build",
+    "setup": "snarkjs groth16 setup ./build/ZkVaultClassic.r1cs ./ref/powersOfTau28_hez_final_18.ptau ./build/ZkVaultClassic.zkey && snarkjs zkey export verificationkey ./build/ZkVaultClassic.zkey ./build/ZkVaultClassicVerificationKey.json && snarkjs zkey export solidityverifier ./build/ZkVaultClassic.zkey ./contracts/ZkVaultClassicVerifier.sol",
     "compile": "hardhat clean && hardhat compile",
     "test": "hardhat test",
     "srv": "anvil -a 2 -m 'suffer fabric dwarf bomb raise pepper rapid pretty cream bleak crime wreck law shuffle puppy flip maximum general absorb faculty resource lyrics country coin'",
